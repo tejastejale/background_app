@@ -1,17 +1,79 @@
-import React, { useEffect, useState } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useEffect, useLayoutEffect, useState } from "react";
+import {
+  BackHandler,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import tw from "twrnc";
 import * as a from "react-native-background-actions";
 import * as Location from "expo-location";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const Main = () => {
+const Main = ({ navigation }) => {
+  const BackgroundService = a.default;
+  const options = {
+    taskName: "Example",
+    taskTitle: "ExampleTask title",
+    taskDesc: "ExampleTask description",
+    taskIcon: {
+      name: "ic_launcher",
+      type: "mipmap",
+    },
+    color: "#ff00ff",
+    linkingURI: "yourSchemeHere://chat/jane", // See Deep Linking for more info
+    parameters: {
+      delay: 3000,
+    },
+  };
   const [location, setLocation] = useState(null);
+  const [userData, setUserData] = useState({});
+  const [isRunning, setIsRunning] = useState(false);
 
   useEffect(() => {
     getCurrentLocation();
+    getUserData();
+    checkService();
   }, []);
 
-  async function getCurrentLocation() {
+  useEffect(() => {
+    const backAction = async () => {
+      const token = await AsyncStorage.getItem("token"); // Get token from AsyncStorage
+      const parsedToken = JSON.parse(token);
+      if (parsedToken.data?.token) {
+        // If token exists, exit the app
+        BackHandler.exitApp();
+        return true; // Prevent default back action
+      } else {
+        return false; // Proceed with default back action
+      }
+    };
+
+    const backHandler = BackHandler.addEventListener(
+      "hardwareBackPress",
+      backAction
+    );
+
+    return () => backHandler.remove(); // Cleanup the listener on unmount
+  }, []);
+
+  const checkService = async () => {
+    const running = await BackgroundService.isRunning();
+    setIsRunning(running);
+  };
+
+  const getUserData = async () => {
+    try {
+      const data = await AsyncStorage.getItem("token");
+      const parsedThing = JSON.parse(data);
+      if (data) setUserData(parsedThing);
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  const getCurrentLocation = async () => {
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
@@ -33,23 +95,6 @@ const Main = () => {
     } catch (error) {
       console.log(error);
     }
-  }
-
-  const BackgroundService = a.default;
-
-  const options = {
-    taskName: "Example",
-    taskTitle: "ExampleTask title",
-    taskDesc: "ExampleTask description",
-    taskIcon: {
-      name: "ic_launcher",
-      type: "mipmap",
-    },
-    color: "#ff00ff",
-    linkingURI: "yourSchemeHere://chat/jane", // See Deep Linking for more info
-    parameters: {
-      delay: 3000,
-    },
   };
 
   const sleep = (time) =>
@@ -58,7 +103,9 @@ const Main = () => {
   const veryIntensiveTask = async (taskDataArguments) => {
     const { delay } = taskDataArguments;
 
-    const ws = new WebSocket("wss://echo.websocket.org/");
+    const ws = new WebSocket(
+      `wss://api-emergency.mooo.com/ws/user/${userData?.data?.profile?.username}/?token=${userData?.data?.token}`
+    );
 
     ws.onopen = () => {
       console.log("WebSocket connection opened inside background task.");
@@ -80,14 +127,13 @@ const Main = () => {
     };
 
     await new Promise(async (resolve) => {
-      let counter = 0;
+      // let counter = 0;
       for (let i = 0; BackgroundService.isRunning(); i++) {
-        console.log(i);
+        // console.log(i);
         if (ws.readyState === WebSocket.OPEN && location) {
           const message = JSON.stringify({
-            latitude: location.latitude,
-            longitude: location.longitude,
-            message: `Sending location #${counter++}`,
+            latitude: `${location.latitude}`,
+            longitude: `${location.longitude}`,
           });
           console.log("Sending :", message);
           ws.send(message);
@@ -109,12 +155,21 @@ const Main = () => {
 
   const startBG = async () => {
     try {
-      if (!BackgroundService.isRunning()) {
+      if (
+        !BackgroundService.isRunning() &&
+        userData?.data?.profile?.username &&
+        userData?.data?.token &&
+        location
+      ) {
         await BackgroundService.start(veryIntensiveTask, options);
         await BackgroundService.updateNotification({
           taskDesc: "Service started!",
         });
-      }
+        setIsRunning(true);
+      } else if (!location)
+        alert("Unable to get location, Please restart the service!");
+      else
+        alert("User data has not been loaded or Service is running already!");
     } catch (e) {
       console.error("Start Error:", e);
     }
@@ -124,30 +179,54 @@ const Main = () => {
     try {
       if (BackgroundService.isRunning()) {
         await BackgroundService.stop();
+        setIsRunning(false);
+        console.log("Service Stoped");
       }
     } catch (e) {
       console.error("Stop Error:", e);
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      const res = await AsyncStorage.removeItem("token");
+      navigation.navigate("Login");
+    } catch (error) {
+      console.log(error);
+    }
+  };
   return (
-    <View style={tw`flex justify-center gap-10 w-full p-4`}>
+    <View style={tw`flex justify-between gap-10 w-full p-4`}>
+      <Text>Is service running: {isRunning ? "Yes" : "No"} </Text>
       <TouchableOpacity
+        disabled={isRunning}
         onPress={() => startBG()}
-        style={tw`bg-green-400 w-full rounded-md p-3.5`}
+        style={tw`${
+          isRunning ? "opacity-50" : ""
+        } bg-green-400 w-full rounded-md p-3.5`}
       >
         <Text style={tw`text-white m-auto font-bold text-lg`}>On</Text>
       </TouchableOpacity>
       <TouchableOpacity
+        disabled={!isRunning}
         onPress={() => stopBG()}
-        style={tw`bg-red-400 w-full rounded-md p-3.5`}
+        style={tw`${
+          !isRunning ? "opacity-50" : "opacity-100"
+        } w-full rounded-md p-3.5 bg-red-500`}
       >
         <Text style={tw`text-white m-auto font-bold text-lg`}>Off</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        disabled={isRunning}
+        onPress={() => handleLogout()}
+        style={tw`${
+          isRunning ? "opacity-50" : "opacity-100"
+        } bg-white text-blue-400 border border-blue-400 w-full rounded-md p-3.5`}
+      >
+        <Text style={tw`text-blue-400 m-auto font-bold text-lg`}>Logout</Text>
       </TouchableOpacity>
     </View>
   );
 };
-
-const styles = StyleSheet.create({});
 
 export default Main;
