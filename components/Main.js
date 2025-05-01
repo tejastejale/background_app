@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useState } from "react";
 import {
   BackHandler,
+  Linking,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -81,6 +82,11 @@ const Main = ({ navigation }) => {
         return;
       }
 
+      const { status: backgroundStatus } =
+        await Location.getBackgroundPermissionsAsync();
+      console.log(backgroundStatus);
+      if (backgroundStatus !== "granted") Linking.openURL("app-settings:");
+
       // Watch for location changes continuously
       Location.watchPositionAsync(
         {
@@ -111,13 +117,6 @@ const Main = ({ navigation }) => {
       console.log("WebSocket connection opened inside background task.");
     };
 
-    ws.onmessage = (e) => {
-      console.log("Received:   ", e.data);
-      BackgroundService.updateNotification({
-        taskDesc: "Received: " + e.data,
-      });
-    };
-
     ws.onerror = (e) => {
       console.log("WebSocket error:", e.message);
     };
@@ -127,22 +126,38 @@ const Main = ({ navigation }) => {
     };
 
     await new Promise(async (resolve) => {
-      // let counter = 0;
+      console.log("object");
+
+      let currentCoords = null;
+
+      // Start location watcher
+      const subscription = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 1000,
+          distanceInterval: 1,
+        },
+        (newLocation) => {
+          currentCoords = newLocation.coords;
+        }
+      );
+
       for (let i = 0; BackgroundService.isRunning(); i++) {
-        // console.log(i);
-        if (ws.readyState === WebSocket.OPEN && location) {
+        if (ws.readyState === WebSocket.OPEN && currentCoords) {
           const message = JSON.stringify({
-            latitude: `${location.latitude}`,
-            longitude: `${location.longitude}`,
+            latitude: `${currentCoords.latitude}`,
+            longitude: `${currentCoords.longitude}`,
           });
           console.log("Sending :", message);
           ws.send(message);
         } else {
-          console.log("WebSocket not open yet or no location data.");
+          console.log("WebSocket not open or location not available");
         }
 
         await sleep(delay);
       }
+
+      if (subscription) subscription.remove();
 
       if (
         ws.readyState === WebSocket.OPEN ||
@@ -150,6 +165,8 @@ const Main = ({ navigation }) => {
       ) {
         ws.close();
       }
+
+      resolve(); // end the task when done
     });
   };
 
