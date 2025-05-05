@@ -11,19 +11,20 @@ import tw from "twrnc";
 import * as a from "react-native-background-actions";
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Notification from "expo-notifications";
 
 const Main = ({ navigation }) => {
   const BackgroundService = a.default;
   const options = {
-    taskName: "Example",
-    taskTitle: "ExampleTask title",
-    taskDesc: "ExampleTask description",
+    taskName: "Background App",
+    taskTitle: "Transmitting Location",
+    taskDesc: "",
     taskIcon: {
       name: "ic_launcher",
       type: "mipmap",
     },
-    color: "#ff00ff",
-    linkingURI: "yourSchemeHere://chat/jane", // See Deep Linking for more info
+    // color: "#ff00ff",
+    // linkingURI: "yourSchemeHere://chat/jane", // See Deep Linking for more info
     parameters: {
       delay: 3000,
     },
@@ -33,6 +34,7 @@ const Main = ({ navigation }) => {
   const [isRunning, setIsRunning] = useState(false);
 
   useEffect(() => {
+    notificationPermission();
     getCurrentLocation();
     getUserData();
     checkService();
@@ -69,6 +71,17 @@ const Main = ({ navigation }) => {
       const data = await AsyncStorage.getItem("token");
       const parsedThing = JSON.parse(data);
       if (data) setUserData(parsedThing);
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  const notificationPermission = async () => {
+    try {
+      const { status } = await Notification.requestPermissionsAsync();
+      if (status !== "granted") {
+        alert("Please do enable notifications!");
+      }
     } catch (error) {
       console.log(error);
     }
@@ -143,6 +156,7 @@ const Main = ({ navigation }) => {
       );
 
       for (let i = 0; BackgroundService.isRunning(); i++) {
+        console.log(i);
         if (ws.readyState === WebSocket.OPEN && currentCoords) {
           const message = JSON.stringify({
             latitude: `${currentCoords.latitude}`,
